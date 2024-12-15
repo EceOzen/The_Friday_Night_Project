@@ -1,0 +1,100 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Dec 15 22:20:37 2024
+
+@author: Ece
+"""
+
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+
+
+df = pd.read_csv('C:/Users/Downloads/Dataset (1).csv')
+df.info()
+
+# Load data (assuming df is your dataframe)
+# Drop rows with missing values in key columns
+df_clean = df.dropna(subset=['Partner Organizations', 'Geographical Region'])
+
+# One-hot encode the 'Geographical Region' for clustering purposes
+df_encoded = pd.get_dummies(df_clean['Geographical Region'], drop_first=True)
+
+# Count the number of partners for each NGO
+df_clean['Number of Partners'] = df_clean['Partner Organizations'].str.split(';').apply(len)
+
+# Combine features related to partnerships and geographical region
+df_features = pd.concat([df_clean[['Number of Partners']], df_encoded], axis=1)
+
+# Standardize the features
+scaler = StandardScaler()
+scaled_features = scaler.fit_transform(df_features)
+
+import networkx as nx
+
+# Initialize an undirected graph
+G = nx.Graph()
+
+# Add nodes (NGOs) and edges (partnerships)
+for _, row in df_clean.iterrows():
+    partners = row['Partner Organizations'].split(';')  # Assuming partners are separated by semicolons
+    for partner in partners:
+        G.add_edge(row['Oragnization Name'], partner.strip(), type='partnership')
+
+# Visualize the network (optional)
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(10, 8))
+nx.draw(G, with_labels=True, node_size=500, node_color='skyblue', font_size=10)
+plt.title("NGO Partnership Network")
+plt.show()
+
+
+# Calculate degree centrality (most connected NGOs)
+degree_centrality = nx.degree_centrality(G)
+
+# Add degree centrality to your dataframe
+df_clean['Degree Centrality'] = df_clean['Oragnization Name'].map(degree_centrality)
+
+# Find the NGOs with the highest degree centrality (most connected)
+most_connected_ngos = df_clean[['Oragnization Name', 'Degree Centrality']].sort_values(by='Degree Centrality', ascending=False).head(10)
+
+print("Most connected NGOs:")
+print(most_connected_ngos)
+
+most_connected_ngos.to_csv('C:/Users/ece_z/Downloads/most_connected_ngos_table.csv', index=False)
+
+from sklearn.cluster import KMeans
+
+# Apply KMeans clustering to categorize NGOs based on connections and region
+kmeans = KMeans(n_clusters=5, random_state=42)
+df_clean['Cluster'] = kmeans.fit_predict(scaled_features)
+
+# View the clustering results by region and centrality
+cluster_summary = df_clean.groupby('Cluster').agg({
+    'Oragnization Name': 'count',
+    'Degree Centrality': 'mean',
+    'Number of Partners': 'mean',
+    'Geographical Region': lambda x: x.mode()[0]  # Most common region in each cluster
+})
+
+print(cluster_summary)
+cluster_summary.to_csv('C:/Users/Downloads/region_centrality_table.csv', index=False)
+
+from sklearn.decomposition import PCA
+
+# Apply PCA to reduce the dimensionality to 2D
+pca = PCA(n_components=2)
+pca_components = pca.fit_transform(scaled_features)
+
+# Add PCA components to the dataframe
+df_clean['PCA1'] = pca_components[:, 0]
+df_clean['PCA2'] = pca_components[:, 1]
+
+# Visualize the clusters
+plt.figure(figsize=(10, 8))
+plt.scatter(df_clean['PCA1'], df_clean['PCA2'], c=df_clean['Cluster'], cmap='viridis', alpha=0.5)
+plt.title('Clustered NGOs by Connectivity and Region')
+plt.xlabel('PCA1')
+plt.ylabel('PCA2')
+plt.colorbar(label='Cluster')
+plt.show()
